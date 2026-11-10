@@ -101,9 +101,11 @@
     if (JSON.stringify(antes.resumo) !== JSON.stringify(depois.resumo)) partesTxt.push('Prazo atualizado');
     return partesTxt.join('; ') || 'Sem mudanças de conteúdo';
   }
-  async function salvar() {
-    if (!sujo() || S.salvando) return;
+  async function salvar(rapido) {
+    if (!sujo()) return;
+    if (S.salvando) { S.filaSalvar = true; return; }
     S.salvando = true; $('b-salvar').disabled = true; $('b-salvar').textContent = 'Salvando…';
+    const enviado = JSON.stringify(S.dados);
     try {
       const r = await fetch('/api/dados', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-senha': S.senha },
         body: JSON.stringify({ dados: S.dados, etag: S.etag, autor: S.autor, resumo: resumoAlteracoes(JSON.parse(S.base), S.dados) }) });
@@ -111,9 +113,21 @@
       if (r.status === 401) { S.senha = ''; sessionStorage.removeItem('m2-senha'); toast('A senha não confere mais. Entre novamente para salvar.'); abrirSenha(); return; }
       if (r.status === 409) { S.conflito = j; $('conf-txt').textContent = `${j.dados?.atualizadoPor || 'Outra pessoa'} salvou uma versão em ${hora(j.dados?.atualizadoEm)} enquanto você editava.`; $('dlg-conflito').showModal(); return; }
       if (!r.ok) { toast(j.erro || 'Não foi possível salvar.'); return; }
-      aplicar(j); toast('Alterações salvas');
+      if (JSON.stringify(S.dados) !== enviado) {
+        // houve novas mudanças enquanto salvava: mantém as locais e atualiza só a versão
+        S.etag = j.etag; S.base = JSON.stringify(j.dados);
+        ['versao', 'atualizadoEm', 'atualizadoPor', 'historico'].forEach((k) => { S.dados[k] = j.dados[k]; });
+        S.filaSalvar = true; atualizarSync();
+      } else if (rapido) {
+        S.dados = j.dados; S.etag = j.etag; S.base = JSON.stringify(j.dados); S.remoto = null; esconderAviso(); atualizarSync();
+        $('foot').textContent = rodape();
+        if (S.aba !== 'painel') renderTudo();
+      } else { aplicar(j); toast('Alterações salvas'); }
     } catch { toast('Sem conexão. Suas alterações continuam na tela; tente salvar de novo.'); }
-    finally { S.salvando = false; $('b-salvar').disabled = false; $('b-salvar').textContent = 'Salvar alterações'; atualizarBarra(); }
+    finally {
+      S.salvando = false; $('b-salvar').disabled = false; $('b-salvar').textContent = 'Salvar alterações'; atualizarBarra();
+      if (S.filaSalvar) { S.filaSalvar = false; if (sujo()) salvar(true); }
+    }
   }
   $('c-recarregar').addEventListener('click', () => { $('dlg-conflito').close(); aplicar(S.conflito); toast('Versão mais recente carregada'); });
   function mesclar(base, meu, remoto) {
@@ -169,6 +183,7 @@
 
   // ---------- edição / senha ----------
   function abrirSenha() { $('in-nome').value = S.autor; $('in-senha').value = ''; $('senha-erro').hidden = true; $('dlg-senha').showModal(); }
+  $('dlg-senha').addEventListener('close', () => { if (!S.editando) S.pendenteConcluir = null; });
   $('btn-editar').addEventListener('click', () => {
     if (S.editando) {
       if (sujo() && !confirm('Há alterações não salvas. Sair da edição e descartá-las?')) return;
@@ -191,6 +206,7 @@
       if (!r.ok) { $('senha-erro').textContent = j.erro || 'Não foi possível validar a senha.'; $('senha-erro').hidden = false; return; }
       S.senha = senha; S.autor = nome; sessionStorage.setItem('m2-senha', senha); localStorage.setItem('m2-autor', nome);
       S.editando = true; $('dlg-senha').close(); renderTudo(); atualizarSync(); toast('Modo de edição ativo');
+      if (S.pendenteConcluir) { const id = S.pendenteConcluir; S.pendenteConcluir = null; setTimeout(() => alternarConclusao(id), 150); }
     } catch { $('senha-erro').textContent = 'Sem conexão com o servidor.'; $('senha-erro').hidden = false; }
     finally { $('b-entrar').disabled = false; }
   });
@@ -210,30 +226,37 @@
   }
 
   // ---------- PAINEL ----------
-  const F = S.filtro;
-  document.querySelector('.chip[data-fase=""]').addEventListener('click', () => { F.fase = ''; aplicarFiltros(); });
+  const F = S.filtro; F.fases = null; F.conhecidas = new Set();
+  document.querySelector('.chip[data-fase=""]').addEventListener('click', () => { F.fases = new Set(F.conhecidas); aplicarFiltros(); });
   $('f-spec').addEventListener('click', () => { F.spec = !F.spec; aplicarFiltros(); });
   $('f-frente').addEventListener('change', (e) => { F.frente = e.target.value; aplicarFiltros(); });
   $('f-status').addEventListener('change', (e) => { F.status = e.target.value; aplicarFiltros(); });
   $('f-status').append(new Option('Todos os status', ''), ...STATUS.map((s) => new Option(s, s)));
   $('d-st-sel').append(...STATUS.map((s) => new Option(s, s)));
+  const feita = (r) => r.status === 'Concluído';
+  const podeMarcar = () => !S.local && S.editavel;
 
   function aplicarFiltros() {
     const E = S.dados.cronograma;
     document.querySelectorAll('.pill').forEach((p) => {
       const r = E.find((x) => x.id === p.dataset.id); if (!r) return;
-      const ok = (!F.fase || r.fase === F.fase) && (!F.frente || r.frente === F.frente) && (!F.status || r.status === F.status) && (!F.spec || r.espectro === 'Sim');
+      const ok = (!F.frente || r.frente === F.frente) && (!F.status || r.status === F.status) && (!F.spec || r.espectro === 'Sim');
       p.classList.toggle('dim', !ok); p.classList.toggle('on', r.id === S.sel); p.setAttribute('aria-pressed', r.id === S.sel ? 'true' : 'false');
     });
-    document.querySelectorAll('.chip[data-fase]').forEach((b) => b.setAttribute('aria-pressed', (b.dataset.fase || '') === F.fase ? 'true' : 'false'));
+    let visiveis = 0;
+    document.querySelectorAll('.phase').forEach((sec) => { const v = F.fases.has(sec.dataset.fase); sec.hidden = !v; if (v) visiveis++; });
+    const vazio = $('tl-vazio'); if (vazio) vazio.hidden = visiveis > 0 || !F.conhecidas.size;
+    document.querySelectorAll('#chips .chip').forEach((b) => b.setAttribute('aria-pressed', F.fases.has(b.dataset.fase) ? 'true' : 'false'));
+    document.querySelector('.chip[data-fase=""]').setAttribute('aria-pressed', F.fases.size === F.conhecidas.size ? 'true' : 'false');
     $('f-spec').setAttribute('aria-pressed', F.spec ? 'true' : 'false');
   }
   const ordemCron = () => [...S.dados.cronograma].sort((a, b) => (a.data || '') < (b.data || '') ? -1 : (a.data || '') > (b.data || '') ? 1 : 0);
+  const rodape = () => `Versão ${S.dados.versao} dos dados${S.dados.atualizadoEm ? ', atualizada em ' + hora(S.dados.atualizadoEm) : ''}. Os títulos são resumos; o texto completo aparece ao selecionar cada etapa.`;
+  const CHECK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.4l2.3 2.3 4.7-5"/></svg>';
 
-  function renderPainel() {
+  function renderIndicadores() {
     const D = S.dados, E = ordemCron(), R = D.resumo || {};
-    const fases = fasesDe(E), corF = (f) => PH[Math.max(0, fases.indexOf(f)) % 4];
-    const et = E.filter((r) => !nota(r)), total = et.length, concl = et.filter((r) => r.status === 'Concluído').length;
+    const et = E.filter((r) => !nota(r)), total = et.length, concl = et.filter(feita).length;
     const spec = et.filter((r) => r.espectro === 'Sim').length, pct = total ? Math.round(100 * concl / total) : 0;
     $('lede').replaceChildren('Das ', el('b', null, total), ' etapas previstas, ', el('b', null, concl), ' estão concluídas e ', el('b', null, spec), ' dependem de medição no espectrofotômetro, hoje concentradas em um único operador.');
     $('leitura').textContent = R.leitura || '';
@@ -241,40 +264,109 @@
     $('k-dias').textContent = diasUteis(R.inicio, R.entrega, R.feriados);
     $('k-dias-s').textContent = `De ${fmt(R.inicio)} a ${fmt(R.entrega)}` + (fer.length ? ` · feriado${fer.length > 1 ? 's' : ''} ${fer.map(fmt).join(', ')} descontado${fer.length > 1 ? 's' : ''}` : '');
     $('k-total').textContent = total; $('k-spec').textContent = spec; $('k-pct').textContent = pct;
-    requestAnimationFrame(() => setTimeout(() => { $('k-bar').style.width = pct + '%'; }, 120));
+    requestAnimationFrame(() => setTimeout(() => { $('k-bar').style.width = pct + '%'; }, 60));
     $('k-entrega').textContent = fmtL(R.entrega); $('k-impl').textContent = R.implantacao ? `Implantação completa até ${fmt(R.implantacao)}` : '';
-    // filtros
-    $('chips').replaceChildren(...fases.map((f) => { const b = el('button', 'chip'); b.dataset.fase = f; b.style.setProperty('--ph', corF(f)); b.append(el('span', 'sw'), el('span', null, f)); b.addEventListener('click', () => { F.fase = F.fase === f ? '' : f; aplicarFiltros(); }); return b; }));
+    grafPizza(et, total);
+  }
+
+  function marcarCompletos(animar) {
+    const E = S.dados.cronograma;
+    document.querySelectorAll('.phase').forEach((sec) => {
+      const rows = E.filter((r) => r.fase === sec.dataset.fase && !nota(r)), n = rows.length, ok = rows.filter(feita).length;
+      const meta = sec.querySelector('.ph-cont'); if (meta) meta.textContent = `${ok} de ${n} ${n === 1 ? 'etapa concluída' : 'etapas concluídas'}`;
+      const completa = n > 0 && ok === n, era = sec.classList.contains('completa');
+      sec.classList.toggle('completa', completa);
+      if (completa && !era && animar && !reduz) { sec.classList.remove('acabou'); void sec.offsetWidth; sec.classList.add('acabou'); }
+    });
+    document.querySelectorAll('.day').forEach((d) => {
+      const rows = E.filter((r) => r.fase === d.dataset.fase && r.data === d.dataset.data && !nota(r));
+      const completa = rows.length > 0 && rows.every(feita), era = d.classList.contains('completa');
+      d.classList.toggle('completa', completa);
+      if (completa && !era && animar && !reduz) { d.classList.remove('acabou'); void d.offsetWidth; d.classList.add('acabou'); }
+    });
+  }
+
+  function desenharCheck(btn, r, animar) {
+    const on = feita(r);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.style.setProperty('--st', corSt(r.status));
+    btn.title = !podeMarcar() ? `Status: ${r.status || '—'}` : on ? 'Concluída – clique para desfazer' : `${r.status || 'Planejado'} – clique para concluir`;
+    btn.setAttribute('aria-label', btn.title);
+    const pill = btn.closest('.pill'); if (pill) pill.classList.toggle('feita', on);
+    if (animar && !reduz) { btn.classList.remove('pop', 'unpop'); void btn.offsetWidth; btn.classList.add(on ? 'pop' : 'unpop'); }
+  }
+
+  function alternarConclusao(id) {
+    if (!podeMarcar()) { toast('A edição não está disponível nesta página.'); return; }
+    if (!S.editando) { S.pendenteConcluir = id; abrirSenha(); return; }
+    const r = S.dados.cronograma.find((x) => x.id === id); if (!r) return;
+    if (feita(r)) { r.status = r.statusAntes && r.statusAntes !== 'Concluído' ? r.statusAntes : 'Planejado'; delete r.statusAntes; }
+    else { r.statusAntes = r.status || 'Planejado'; r.status = 'Concluído'; }
+    document.querySelectorAll(`.pill[data-id="${CSS.escape(id)}"] .ck`).forEach((b) => desenharCheck(b, r, true));
+    renderIndicadores(); marcarCompletos(true); grafCarga(ordemCron());
+    if (S.sel === id) preencherDetalhe();
+    aplicarFiltros(); atualizarBarra(); salvar(true);
+  }
+
+  function renderPainel() {
+    const D = S.dados, E = ordemCron();
+    const fases = fasesDe(E), corF = (f) => PH[Math.max(0, fases.indexOf(f)) % 4];
+    const et = E.filter((r) => !nota(r));
+    // fases visíveis: novas fases entram visíveis
+    if (!F.fases) F.fases = new Set(fases);
+    fases.forEach((f) => { if (!F.conhecidas.has(f)) F.fases.add(f); });
+    F.conhecidas = new Set(fases); [...F.fases].forEach((f) => { if (!F.conhecidas.has(f)) F.fases.delete(f); });
+    renderIndicadores();
+    $('chips').replaceChildren(...fases.map((f) => {
+      const b = el('button', 'chip'); b.dataset.fase = f; b.style.setProperty('--ph', corF(f)); b.append(el('span', 'sw'), el('span', null, f));
+      b.title = 'Clique para mostrar ou esconder esta fase';
+      b.addEventListener('click', () => { if (F.fases.has(f)) F.fases.delete(f); else F.fases.add(f); aplicarFiltros(); });
+      return b;
+    }));
     const frentes = Array.from(new Set(et.map((r) => r.frente).filter(Boolean)));
     $('f-frente').replaceChildren(new Option('Todas as frentes', ''), ...frentes.map((f) => new Option(f, f)));
     $('f-frente').value = frentes.includes(F.frente) ? F.frente : (F.frente = '');
     $('f-status').value = F.status;
-    // linha do tempo
     const tl = $('timeline'); tl.replaceChildren(); let k = 0; const animar = !reduz && !S.animou; S.animou = true;
+    const vazio = el('p', 'tl-vazio', 'Nenhuma fase selecionada. Clique nas fases acima para exibi-las.'); vazio.id = 'tl-vazio'; vazio.hidden = true; tl.append(vazio);
     fases.forEach((f) => {
-      const doF = E.filter((r) => r.fase === f), datas = Array.from(new Set(doF.map((r) => r.data))).sort(), n = doF.filter((r) => !nota(r)).length;
-      const sec = el('div', 'phase'); sec.style.setProperty('--ph', corF(f));
-      const h = el('div', 'ph-head'); h.append(el('b', null, f), el('span', null, fmt(datas[0]) + (datas.length > 1 ? ' a ' + fmt(datas[datas.length - 1]) : '') + ' · ' + n + (n === 1 ? ' etapa' : ' etapas')));
+      const doF = E.filter((r) => r.fase === f), datas = Array.from(new Set(doF.map((r) => r.data))).sort();
+      const sec = el('div', 'phase'); sec.dataset.fase = f; sec.style.setProperty('--ph', corF(f));
+      const h = el('div', 'ph-head');
+      h.append(el('b', null, f), el('span', null, fmt(datas[0]) + (datas.length > 1 ? ' a ' + fmt(datas[datas.length - 1]) : '')), el('span', 'ph-cont'));
       const g = el('div', 'days');
       datas.forEach((dt) => {
         const doD = doF.filter((r) => r.data === dt), c = el('div', 'day'), dh = el('div', 'day-h'), ns = doD.filter((r) => r.espectro === 'Sim').length;
+        c.dataset.fase = f; c.dataset.data = dt;
         dh.append(el('b', null, diaSem(dt) + ' ' + fmt(dt)), el('span', 'spec', ns ? '◉ ' + ns : '')); c.append(dh);
         doD.forEach((r) => {
-          const p = el('button', 'pill' + (nota(r) ? ' note' : '') + (animar ? ' in' : '')); p.dataset.id = r.id; p.style.animationDelay = Math.min(k++ * 25, 1000) + 'ms';
+          const p = el('div', 'pill' + (nota(r) ? ' note' : '') + (animar ? ' in' : '')); p.dataset.id = r.id; p.style.animationDelay = Math.min(k++ * 25, 1000) + 'ms';
+          p.tabIndex = 0; p.setAttribute('role', 'button');
           const m = el('span', 'm'); m.append(el('span', null, r.frente || ''));
           if (r.espectro === 'Sim') m.append(el('span', 'spec', '◉ espectro'));
           if (r.comentario) m.append(el('span', 'cm', '💬'));
-          const st = el('span', 'st'); st.style.setProperty('--st', corSt(r.status)); st.title = r.status || ''; m.append(st);
+          if (!nota(r)) {
+            const ck = el('button', 'ck' + (podeMarcar() ? '' : ' ro')); ck.type = 'button'; ck.innerHTML = CHECK;
+            ck.addEventListener('click', (ev) => { ev.stopPropagation(); if (podeMarcar()) alternarConclusao(r.id); });
+            ck.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') ev.stopPropagation(); });
+            ck.addEventListener('animationend', () => ck.classList.remove('pop', 'unpop'));
+            m.append(ck);
+          }
           p.append(el('span', 't', r.titulo || r.atividade || '(sem título)'), m);
-          p.addEventListener('click', () => selecionar(r.id, true)); c.append(p);
+          p.addEventListener('click', () => selecionar(r.id, true));
+          p.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selecionar(r.id, true); } });
+          c.append(p);
+          const ckb = p.querySelector('.ck'); if (ckb) desenharCheck(ckb, r, false);
         });
+        c.addEventListener('animationend', () => c.classList.remove('acabou'));
         g.append(c);
       });
+      sec.addEventListener('animationend', (ev) => { if (ev.target === sec || ev.target === h) sec.classList.remove('acabou'); });
       sec.append(h, g); tl.append(sec);
     });
     if (S.sel && !E.some((r) => r.id === S.sel)) S.sel = null;
-    preencherDetalhe(); aplicarFiltros(); grafCarga(E); grafPizza(et, total);
-    $('foot').textContent = `Versão ${D.versao} dos dados${D.atualizadoEm ? ', atualizada em ' + hora(D.atualizadoEm) : ''}. Os títulos são resumos; o texto completo aparece ao selecionar cada etapa.`;
+    marcarCompletos(false); preencherDetalhe(); aplicarFiltros(); grafCarga(E);
+    $('foot').textContent = rodape();
   }
   function selecionar(id, rolar) {
     S.sel = id; preencherDetalhe(); aplicarFiltros();
@@ -294,11 +386,11 @@
     $('d-edit').hidden = !S.editando;
     if (S.editando) { $('d-st-sel').value = r.status || 'Planejado'; $('d-com-in').value = r.comentario || ''; }
   }
-  $('d-st-sel').addEventListener('change', (e) => { const r = S.dados.cronograma.find((x) => x.id === S.sel); if (!r) return; r.status = e.target.value; renderPainel(); atualizarBarra(); });
+  $('d-st-sel').addEventListener('change', (e) => { const r = S.dados.cronograma.find((x) => x.id === S.sel); if (!r) return; r.status = e.target.value; delete r.statusAntes; renderPainel(); atualizarBarra(); });
   $('d-com-in').addEventListener('input', (e) => { const r = S.dados.cronograma.find((x) => x.id === S.sel); if (!r) return; r.comentario = e.target.value; $('d-comentario').textContent = r.comentario || '—'; atualizarBarra(); });
   $('d-com-in').addEventListener('change', () => renderPainel());
   function passo(d) {
-    const o = ordemCron().filter((r) => !nota(r)).map((r) => r.id); if (!o.length) return;
+    const o = ordemCron().filter((r) => !nota(r) && F.fases.has(r.fase)).map((r) => r.id); if (!o.length) return;
     const j = o.indexOf(S.sel), id = o[j < 0 ? 0 : Math.max(0, Math.min(o.length - 1, j + d))];
     selecionar(id); const p = document.querySelector(`.pill[data-id="${CSS.escape(id)}"]`); if (p) p.scrollIntoView({ block: 'nearest', behavior: reduz ? 'auto' : 'smooth' });
   }
