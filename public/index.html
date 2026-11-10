@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caminho viável para campanhas nacionais – M2flex</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='4' height='16' fill='%230091C7'/><rect x='4' width='4' height='16' fill='%23C8006B'/><rect x='8' width='4' height='16' fill='%23E0AE00'/><rect x='12' width='4' height='16' fill='%2330343B'/></svg>">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="strip" id="strip" aria-hidden="true"></div>
+  <div class="topo">
+    <nav class="abas" role="tablist">
+      <button role="tab" data-aba="painel" aria-selected="true">Painel</button>
+      <button role="tab" data-aba="planilha" aria-selected="false">Planilha</button>
+      <button role="tab" data-aba="historico" aria-selected="false">Histórico</button>
+    </nav>
+    <div class="sync"><span class="dot" id="sync-dot"></span><span id="sync-txt">Carregando…</span></div>
+    <button class="btn" id="btn-editar">Editar</button>
+  </div>
+  <div class="aviso" id="aviso" hidden></div>
+
+  <!-- PAINEL -->
+  <section id="aba-painel">
+    <header>
+      <p class="who">M2flex · Gestão de cores · Proposta para validação com a gestão</p>
+      <h1>Caminho viável para campanhas nacionais</h1>
+      <p class="lede" id="lede"></p>
+      <div class="prazo"><strong>Leitura do prazo</strong><span id="leitura"></span></div>
+    </header>
+    <div class="kpis">
+      <div class="kpi" style="--a:var(--c)"><p class="l">Dias úteis disponíveis</p><p class="v" id="k-dias"></p><p class="s" id="k-dias-s"></p></div>
+      <div class="kpi" style="--a:var(--m)"><p class="l">Etapas previstas</p><p class="v" id="k-total"></p><p class="s">8 conjuntos de equipamento</p></div>
+      <div class="kpi" style="--a:var(--warn)"><p class="l">Etapas com espectrofotômetro</p><p class="v" id="k-spec"></p><p class="s">Um único operador habilitado</p></div>
+      <div class="kpi" style="--a:var(--ok)"><p class="l">Concluídas</p><p class="v"><span id="k-pct"></span>%</p><div class="bar"><i id="k-bar"></i></div></div>
+      <div class="kpi" style="--a:var(--k)"><p class="l">Entrega do caminho viável</p><p class="v" id="k-entrega"></p><p class="s" id="k-impl"></p></div>
+    </div>
+    <section class="card">
+      <h2>Cronograma por fase</h2>
+      <p class="sub">Clique em uma etapa para ver a descrição completa. Os filtros destacam as etapas sem esconder o restante.</p>
+      <div class="filters">
+        <button class="chip" data-fase="" aria-pressed="true">Todas as fases</button>
+        <span id="chips"></span>
+        <button class="chip" id="f-spec" style="--ph:var(--warn)" aria-pressed="false">◉ Só etapas com espectrofotômetro</button>
+        <select id="f-frente" aria-label="Frente"></select>
+        <select id="f-status" aria-label="Status"></select>
+      </div>
+      <div class="main">
+        <div id="timeline"></div>
+        <aside class="detail" id="detail" aria-live="polite">
+          <p class="empty" id="empty">Selecione uma etapa no cronograma para ver a atividade completa, o responsável sugerido, o entregável e os pontos de atenção.</p>
+          <div id="det" hidden>
+            <p class="k" id="d-kicker"></p>
+            <h3 id="d-titulo"></h3>
+            <div class="tags"><span class="tag" id="d-frente"></span><span class="tag s" id="d-status"></span><span class="tag" id="d-spec"></span></div>
+            <dl>
+              <div><dt>Atividade</dt><dd id="d-atividade"></dd></div>
+              <div><dt>Responsável sugerido</dt><dd id="d-responsavel"></dd></div>
+              <div><dt>Entregável sugerido</dt><dd id="d-entregavel"></dd></div>
+              <div><dt>Critério sugerido (a validar)</dt><dd id="d-criterio"></dd></div>
+              <div><dt>Dependência / ponto de atenção</dt><dd id="d-atencao"></dd></div>
+              <div id="d-com-box"><dt>Comentário da gestão</dt><dd id="d-comentario"></dd></div>
+            </dl>
+            <div class="ed" id="d-edit" hidden>
+              <label>Status <select id="d-st-sel"></select></label>
+              <label>Comentário da gestão <textarea id="d-com-in" rows="3" placeholder="Registre uma observação, aprovação ou ajuste para esta etapa"></textarea></label>
+            </div>
+            <div class="nav"><button id="prev">← Etapa anterior</button><button id="next">Próxima etapa →</button></div>
+            <p class="hint">Dica: use as setas ← e → do teclado para navegar durante a apresentação.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+    <div class="charts">
+      <section class="card"><h2>Carga diária no espectrofotômetro</h2><p class="sub">Etapas por dia que dependem de medição. Todas passam pelo mesmo operador, por isso a indicação de um backup.</p><div class="chart" id="carga"></div></section>
+      <section class="card"><h2>Situação das etapas</h2><p class="sub">Status registrado na planilha.</p><div class="chart" id="pizza"></div></section>
+    </div>
+  </section>
+
+  <!-- PLANILHA -->
+  <section id="aba-planilha" hidden>
+    <section class="card">
+      <h2>Prazo</h2>
+      <p class="sub" id="pl-sub">Para alterar qualquer informação, clique em Editar e informe a senha.</p>
+      <div class="form-resumo" id="form-resumo"></div>
+    </section>
+    <section class="card">
+      <div class="tab-tabelas" id="tab-tabelas"></div>
+      <div class="tbl-acoes" id="tbl-acoes"></div>
+      <div class="tbl-wrap"><table class="tbl" id="tbl"></table></div>
+    </section>
+  </section>
+
+  <!-- HISTÓRICO -->
+  <section id="aba-historico" hidden>
+    <section class="card">
+      <h2>Histórico de alterações</h2>
+      <p class="sub" id="hist-sub"></p>
+      <ol class="hist" id="hist"></ol>
+    </section>
+  </section>
+  <footer id="foot"></footer>
+</div>
+
+<div class="barra" id="barra" hidden>
+  <span id="barra-txt"></span>
+  <span class="barra-acoes"><button class="btn ghost" id="b-descartar">Descartar</button><button class="btn" id="b-salvar">Salvar alterações</button></span>
+</div>
+
+<dialog id="dlg-senha">
+  <form method="dialog" id="form-senha">
+    <h3>Entrar no modo de edição</h3>
+    <p class="sub">Seu nome aparece no histórico de cada alteração salva.</p>
+    <label>Seu nome <input id="in-nome" required maxlength="80" autocomplete="name"></label>
+    <label>Senha de edição <input id="in-senha" type="password" required autocomplete="current-password"></label>
+    <p class="erro" id="senha-erro" hidden></p>
+    <div class="dlg-acoes"><button class="btn ghost" value="cancelar" formnovalidate>Cancelar</button><button class="btn" id="b-entrar" value="ok">Entrar</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-conflito">
+  <h3>Outra pessoa salvou alterações</h3>
+  <p id="conf-txt"></p><p class="sub">Ao juntar, suas linhas alteradas substituem as mesmas linhas da versão nova; as demais alterações da outra pessoa são mantidas.</p>
+  <div class="dlg-acoes"><button class="btn ghost" id="c-recarregar">Recarregar e descartar as minhas</button><button class="btn" id="c-sobrescrever">Juntar com a versão nova e salvar</button></div>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>

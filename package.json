@@ -1,0 +1,10 @@
+{
+  "name": "m2flex-gestao-cores-campanhas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Painel e planilha editáveis do caminho viável para campanhas nacionais – M2flex",
+  "dependencies": {
+    "@netlify/blobs": "^10.7.13"
+  }
+}
